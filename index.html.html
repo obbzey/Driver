@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Driver Dashboard – Campus Shuttle</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);background:#05070a}
+html,body,#root{height:100%;margin:0}
+body{background:#05070a;color:#fff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent;user-select:none}
+@keyframes flashPulse{0%{opacity:0}15%{opacity:1}100%{opacity:0}}
+.flash{animation:flashPulse .9s ease-out forwards}
+@keyframes sosPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,40,40,.7)}50%{box-shadow:0 0 0 22px rgba(255,40,40,0)}}
+.sos-pulse{animation:sosPulse 1.8s infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect,useRef,useMemo}=React;
+const html=htm.bind(React.createElement);
+
+function Icon({n,s=28,c=''}){
+  const r=useRef();
+  useEffect(()=>{try{const el=lucide.createElement(lucide.icons[n]);el.setAttribute('width',s);el.setAttribute('height',s);el.setAttribute('stroke-width',2.75);r.current.replaceChildren(el);}catch(e){}},[n,s]);
+  return html`<span ref=${r} className=${'inline-flex shrink-0 '+c}/>`;
+}
+
+let ac;
+function tone(f,d,type){
+  try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+  const o=ac.createOscillator(),g=ac.createGain();o.type=type;o.frequency.value=f;
+  g.gain.setValueAtTime(.25,ac.currentTime);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);
+  o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d);}catch(e){}
+}
+
+const NAMES=["Amira Hassan","Omar Khaled","Sara Mostafa","Youssef Adel","Nour El-Din","Layla Samir","Karim Fathy","Mariam Tarek","Ziad Ashraf","Hana Ibrahim","Mostafa Nabil","Salma Reda"];
+const INIT=NAMES.map((n,i)=>({id:"2024"+String(1040+i*7),name:n,seat:i+1,status:i<3?"boarded":"pending"}));
+
+function SosModal({kind,onCancel,onFire}){
+  const D=kind==='delay';
+  const [p,setP]=useState(0);const t=useRef();const st=useRef(0);
+  const up=()=>{clearInterval(t.current);setP(0);};
+  const down=()=>{st.current=performance.now();clearInterval(t.current);
+    t.current=setInterval(()=>{const v=Math.min(1,(performance.now()-st.current)/2000);setP(v);if(v>=1){clearInterval(t.current);onFire();}},30);};
+  useEffect(()=>()=>clearInterval(t.current),[]);
+  return html`<div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-8">
+    <div className="w-full max-w-3xl bg-[#1a0000] border-8 border-red-600 rounded-3xl p-8 text-center">
+      <${Icon} n=${D?"Clock":"AlertTriangle"} s=${72} c=${D?"text-amber-400":"text-red-500"}/>
+      <h2 className="text-5xl font-black mt-3">${D?"REPORT DELAY?":"SEND EMERGENCY ALERT?"}</h2>
+      <p className="text-2xl text-red-200 mt-3">Admin and reserved passengers will be notified with your bus, route and current location.</p>
+      <button onPointerDown=${down} onPointerUp=${up} onPointerLeave=${up} onPointerCancel=${up}
+        className="relative overflow-hidden touch-none select-none mt-8 w-full h-36 rounded-2xl bg-red-950 border-4 border-red-400 text-4xl font-black">
+        <div className="absolute inset-y-0 left-0 bg-red-600" style=${{width:p*100+'%'}}/>
+        <span className="relative">${p>0?'KEEP HOLDING…':(D?'HOLD 2 SECONDS TO SEND DELAY':'HOLD 2 SECONDS TO CONFIRM')}</span>
+      </button>
+      <button onClick=${onCancel} className="mt-5 w-full h-24 rounded-2xl bg-white text-black text-3xl font-black active:bg-gray-300">CANCEL</button>
+    </div></div>`;
+}
+
+function App(){
+  const [list,setList]=useState(INIT);
+  const [filter,setFilter]=useState("all");
+  const [flash,setFlash]=useState(null);
+  const [last,setLast]=useState(null);
+  const [fk,setFk]=useState(0);
+  const [modal,setModal]=useState(false);
+  const [sos,setSos]=useState(null);
+  const [now,setNow]=useState(new Date());
+  useEffect(()=>{const i=setInterval(()=>setNow(new Date()),1000);return()=>clearInterval(i)},[]);
+  const fmt=d=>d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const boarded=list.filter(s=>s.status==="boarded").length;
+  const shown=useMemo(()=>filter==="all"?list:list.filter(s=>s.status===filter),[list,filter]);
+
+  const toggle=id=>setList(l=>l.map(s=>s.id===id?{...s,status:s.status==="boarded"?"pending":"boarded"}:s));
+  const trigger=ok=>{
+    const pend=list.filter(s=>s.status==="pending");
+    const who=pend.length?pend[ok?0:Math.floor(Math.random()*pend.length)]:list[0];
+    if(ok){tone(1400,.35,'sine');setList(l=>l.map(s=>s.id===who.id?{...s,status:"boarded"}:s));}
+    else{tone(140,.6,'sawtooth');}
+    setLast({ok,name:who.name,t:fmt(new Date())});setFlash(ok?"ok":"fail");setFk(k=>k+1);
+  };
+  useEffect(()=>{if(!flash)return;const t=setTimeout(()=>setFlash(null),900);return()=>clearTimeout(t)},[fk]);
+  const fire=()=>{const k=modal;setModal(false);setSos({t:fmt(new Date()),kind:k});tone(900,.2,'square');};
+
+  const tabs=[["all","All",list.length],["pending","Pending",list.length-boarded],["boarded","Boarded",boarded]];
+  return html`<div className="h-full flex flex-col bg-[#05070a] p-3 gap-3">
+    ${flash&&html`<div key=${fk} className=${"flash fixed inset-0 z-40 pointer-events-none border-[18px] "+(flash==="ok"?"bg-green-500/40 border-green-400":"bg-red-600/40 border-red-500")}/>`}
+    <header className="flex items-center justify-between bg-[#10161d] rounded-2xl px-6 h-20 shrink-0">
+      <div className="flex items-center gap-4"><${Icon} n="Bus" s=${44} c="text-yellow-300"/>
+        <div><div className="text-3xl font-black leading-none">Shuttle 12 · North Loop</div><div className="text-lg text-gray-400">${sos?html`<span className=${"font-black "+(sos.kind==="delay"?"text-amber-300":"text-red-400")}>${sos.kind==="delay"?"DELAYED":"OUT OF SERVICE"}</span>`:html`<span className="text-green-400 font-bold">ON ROUTE</span>`} · GPS Active · Next stop: Library · 2 buses nearby</div></div></div>
+      <div className="flex items-center gap-8">
+        <div className="text-right"><div className="text-3xl font-black">${boarded} / ${list.length}</div><div className="text-lg text-gray-400">boarded</div></div>
+        <div className="text-4xl font-black tabular-nums">${fmt(now)}</div>
+      </div>
+    </header>
+
+    <main className="flex-1 min-h-0 grid grid-cols-[1.55fr_1fr] gap-3">
+      <section className="bg-[#10161d] rounded-2xl p-4 flex flex-col min-h-0">
+        <h2 className="text-2xl font-black flex items-center gap-3"><${Icon} n="Users" s=${30}/> Passenger Manifest</h2>
+        <div className="text-xl text-yellow-300 font-bold mb-3">North Loop — 08:00 departure — Bus SH-12</div>
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          ${tabs.map(([k,l,c])=>html`<button key=${k} onClick=${()=>setFilter(k)}
+            className=${"h-16 rounded-xl text-2xl font-black border-4 "+(filter===k?"bg-yellow-300 text-black border-yellow-300":"bg-black text-white border-gray-600 active:bg-gray-800")}>${l} (${c})</button>`)}
+        </div>
+        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+          ${shown.length===0&&html`<div className="text-center text-2xl text-gray-400 py-16">No passengers in this view</div>`}
+          ${shown.map(s=>html`<button key=${s.id} onClick=${()=>toggle(s.id)}
+            className=${"w-full min-h-[88px] flex items-center justify-between rounded-xl px-5 border-4 text-left "+(s.status==="boarded"?"bg-green-950 border-green-500":"bg-black border-gray-500 active:bg-gray-900")}>
+            <div><div className="text-3xl font-black">${s.name}</div><div className="text-xl text-gray-400">ID ${s.id} · Seat ${s.seat}</div></div>
+            <div className=${"flex items-center gap-3 px-5 h-14 rounded-full text-2xl font-black "+(s.status==="boarded"?"bg-green-500 text-black":"bg-amber-400 text-black")}>
+              <${Icon} n=${s.status==="boarded"?"CheckCircle2":"Clock"} s=${30}/>${s.status==="boarded"?"Boarded":"Pending"}</div>
+          </button>`)}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3 min-h-0">
+        <div className=${"rounded-2xl p-5 flex-1 flex flex-col items-center justify-center text-center border-8 "+(!last?"bg-[#10161d] border-gray-700":last.ok?"bg-green-600 border-green-300":"bg-red-700 border-red-300")}>
+          ${!last?html`<${Icon} n="ScanLine" s=${72} c="text-gray-400"/><div className="text-3xl font-black mt-2">READY FOR PAYMENT</div><div className="text-xl text-gray-400">Tap Student ID Card or verify QR payment</div>`
+          :html`<${Icon} n=${last.ok?"BadgeCheck":"XOctagon"} s=${84}/>
+            <div className="text-5xl font-black mt-2">${last.ok?"BEEP ✓ PAID":"BUZZ ✕ DECLINED"}</div>
+            <div className="text-3xl font-bold mt-1">${last.name}</div>
+            <div className="text-xl opacity-90">${last.ok?"Fare accepted":"Insufficient funds"} · ${last.t}</div>`}
+        </div>
+        <div className="bg-[#10161d] rounded-2xl p-3">
+          <div className="text-lg text-gray-400 mb-2 px-1">DEMO CONTROLS — simulate payment result</div>
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick=${()=>trigger(true)} className="h-20 rounded-xl bg-green-500 text-black text-2xl font-black active:bg-green-300">Successful Payment</button>
+            <button onClick=${()=>trigger(false)} className="h-20 rounded-xl bg-red-600 text-white text-2xl font-black active:bg-red-400">Failed Payment</button>
+          </div>
+        </div>
+        ${sos?html`<div className=${"rounded-2xl text-black p-4 h-56 flex flex-col justify-between "+(sos.kind==="delay"?"bg-amber-400":"bg-red-500")}>
+            <div><div className="flex items-center gap-3 text-3xl font-black"><${Icon} n=${sos.kind==="delay"?"Clock":"Siren"} s=${40}/> ${sos.kind==="delay"?"DELAY REPORTED":"SOS SENT"} ${sos.t}</div>
+            <div className="text-2xl font-bold mt-1">Admin and passengers notified</div>
+            <div className="text-3xl font-black mt-1">Bus status: ${sos.kind==="delay"?"DELAYED":"OUT OF SERVICE"}</div></div>
+            <button onClick=${()=>setSos(null)} className="h-16 rounded-xl bg-black text-white text-2xl font-black active:bg-gray-700">Mark Resolved</button></div>`
+        :html`<div className="flex flex-col gap-3 shrink-0"><button onClick=${()=>setModal('sos')} className="sos-pulse h-32 rounded-2xl bg-red-600 border-8 border-red-300 text-white text-6xl font-black flex items-center justify-center gap-5 active:bg-red-800">
+            <${Icon} n="Siren" s=${64}/> SOS</button>
+          <button onClick=${()=>setModal('delay')} className="h-20 rounded-2xl bg-amber-400 border-4 border-amber-200 text-black text-3xl font-black flex items-center justify-center gap-4 active:bg-amber-300"><${Icon} n="Clock" s=${36}/> REPORT DELAY</button></div>`}
+      </section>
+    </main>
+    ${modal&&html`<${SosModal} kind=${modal} onCancel=${()=>setModal(false)} onFire=${fire}/>`}
+  </div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
